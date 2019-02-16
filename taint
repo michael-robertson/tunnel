@@ -1,0 +1,107 @@
+#!/bin/bash
+
+# bail on failure
+set -e
+
+NETWORK="Wi-Fi"
+
+if [ "$1" = "us" ]; then
+  export AWS_DEFAULT_REGION=us-east-1
+  KEYPAIR=mprjump
+  AMI=ami-43a15f3e
+  SUBNET=subnet-4cdbb916
+  SECURITY_GROUP=sg-f5d23b85
+elif [ "$1" = "london" ]; then
+  export AWS_DEFAULT_REGION=eu-west-2
+  KEYPAIR=london
+  AMI=ami-06328f1e652dc7605
+  SUBNET=subnet-af8b62e2
+  SECURITY_GROUP=sg-0b83686781aee6377
+else
+  echo "us or london?"
+  exit 1
+fi
+
+# get instance info
+IID=$(aws ec2 describe-instances --output text \
+  --query 'Reservations[].Instances[].InstanceId' \
+  --filters 'Name=tag:Name,Values=mprjump' 'Name=instance-state-name,Values=running')
+
+#STATE=$(aws ec2 describe-instances --instance-id $IID \
+#  --output text --query 'Reservations[].Instances[].State.Name')
+#[ "$STATE" != "running" ] && IID=
+
+if [ ! "$IID" ]
+then
+  echo -n "===> Launching new instance in $1 ... "
+  IID=$(aws ec2 run-instances \
+    --image-id $AMI \
+    --instance-type t2.nano \
+    --key-name $KEYPAIR \
+    --subnet-id $SUBNET \
+    --security-group-ids $SECURITY_GROUP \
+    --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=mprjump}]' \
+    --output text --query 'Instances[].InstanceId')
+  echo $IID
+  #sleep 5 # give it a little time ...
+  #IID=$(aws ec2 describe-instances --output text \
+  #  --query 'Reservations[].Instances[].InstanceId' \
+  #  --filters 'Name=tag:Name,Values=mprjump' \
+  #            'Name=instance-state-name,Values=pending,running')
+  aws ec2 wait instance-running --instance-ids $IID
+fi
+
+## bring instance up if necessary
+#echo "==> Tunnel instance is $STATE"
+#if [ "$STATE" != "running" ]
+#then
+#  echo "==> Starting instance"
+#  aws ec2 start-instances --instance-ids $IID > /dev/null
+#  aws ec2 wait instance-running --instance-ids $IID
+#fi
+
+# Get public IP address, add it to proxy config
+PUBLICIP=$(aws ec2 describe-instances --instance-id $IID \
+  --output text --query 'Reservations[].Instances[].PublicIpAddress')
+if [ ! "$PUBLICIP" ]
+then
+  echo what the fuck no public ip
+  exit 1
+fi
+
+while ! nc -z -G 5 $PUBLICIP 22
+do
+  echo "==> Waiting for instance to respond at $PUBLICIP"
+  sleep 5
+done
+
+# Initiate tunnel
+echo "==> Activating tunnel"
+nohup ssh -i ~/.ssh/$KEYPAIR.pem -o StrictHostKeyChecking=no \
+  -N -D 2222 ubuntu@$PUBLICIP &
+tail -F nohup.out &
+BYPASS=$(sudo networksetup -getproxybypassdomains $NETWORK)
+sudo networksetup -setproxybypassdomains $NETWORK $BYPASS $PUBLICIP/32
+sudo networksetup -setsocksfirewallproxystate $NETWORK on
+echo "==> Tunnel up, enter \"exit\" to stop"
+
+# User types anything, shut it down, restore prior network config
+read something
+sudo networksetup -setsocksfirewallproxystate $NETWORK off
+sudo networksetup -setproxybypassdomains $NETWORK $BYPASS
+ssh-keygen -R $PUBLICIP
+kill %1 %2
+rm nohup.out
+echo "==> Tunnel over"
+
+# Stop if did not already run it
+if [ "$something" != "keep" ]
+then
+ echo "==> Stopping instance"
+ #aws ec2 stop-instances --instance-ids $IID > /dev/null
+ #aws ec2 wait instance-stopped --instance-ids $IID
+ #echo "==> Instance stopped"
+ aws ec2 terminate-instances --instance-ids $IID > /dev/null
+ echo "==> Instance gone"
+fi
+
