@@ -1,8 +1,8 @@
-# Taint
+# Tunnel
 
-Where am I? Good question. Maybe I want to be somewhere else, but only temporarily.
+Let's make a jumpbox. Script handles the MacOS tunnel and networking.
 
-So let's make a jumpbox. Script handles the MacOS tunnel and networking.
+'Tain't here nor there.
 
 ## TODO
 Parameterize some stuff. Pretty easy to make a yaml-kinda hash for location and resource ids.
