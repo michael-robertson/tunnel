@@ -65,6 +65,7 @@ nohup ssh -i ~/.ssh/$KEYPAIR.pem -o StrictHostKeyChecking=no \
   -N -D 2222 ubuntu@$PUBLICIP &
 tail -F nohup.out &
 BYPASS=$(sudo networksetup -getproxybypassdomains $NETWORK)
+# preserve manually-set bypass domains - I use "10.0.0.0/8" - this can be smarter
 sudo networksetup -setproxybypassdomains $NETWORK $BYPASS $PUBLICIP/32
 sudo networksetup -setsocksfirewallproxystate $NETWORK on
 echo "==> Tunnel up, enter \"exit\" to stop"
